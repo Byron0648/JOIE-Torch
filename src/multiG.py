@@ -237,3 +237,5 @@ class multiG(object):
         tmp_dict = pickle.load(f)
         self.__dict__.update(tmp_dict)
         print("Loaded data object from", filename)
+
+

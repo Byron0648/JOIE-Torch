@@ -14,6 +14,7 @@ import torch.nn as nn
 
 class Tester(object):
     def __init__(self):
+        self.test_align = None
         self.train_list = None
         self.graph_id = None
         self.graph = None
@@ -41,6 +42,8 @@ class Tester(object):
         self.train_hr_map = {}
         self.train_tr_map = {}
         self.train_ht_map = {}
+        # entity map
+        self.lr_map = {}
 
     def build(self, save_path='this-model.ckpt', data_save_path='this-data.bin', graph='ins', method='transe',
               bridge='CG'):
@@ -89,21 +92,54 @@ class Tester(object):
 
         self.joie.load_state_dict(torch.load(save_path))
 
-        self.vec_e[1] = np.array(self.joie.ht1.detach().numpy())
-        self.vec_e[2] = np.array(self.joie.ht2.detach().numpy())
-        self.vec_r[1] = np.array(self.joie.r1.detach().numpy())
-        self.vec_r[2] = np.array(self.joie.r2.detach().numpy())
+        self.vec_e[1] = self.joie.ht1
+        self.vec_e[2] = self.joie.ht2
+        self.vec_r[1] = self.joie.r1
+        self.vec_r[2] = self.joie.r2
 
         if self.bridge == "CMP-double":
-            self.Mc = np.array(self.joie.Mc.detach().numpy())
-            self.bc = np.array(self.joie.bc.detach().numpy())
-            self.Me = np.array(self.joie.Me.detach().numpy())
-            self.be = np.array(self.joie.be.detach().numpy())
+            self.Mc = self.joie.Mc
+            self.bc = self.joie.bc
+            self.Me = self.joie.Me
+            self.be = self.joie.be
         else:
-            self.mat = np.array(self.joie.M.detach().numpy())
-            self.b = np.array(self.joie.b.detach().numpy())
+            self.mat = self.joie.M
+            self.b = self.joie.b
 
-    def  load_test_link(self, filename, max_num=2000, splitter='\t', line_end='\n', dedup=True):
+    def load_cross_link(self, filename, max_num=10000, splitter='\t', line_end='\n', dedup=True):
+        num_lines = 0
+        align = []
+        dedup_set = set([])
+        for line in open(filename):
+            if len(align) > max_num:
+                break
+            if dedup and line in dedup_set:
+                continue
+            elif dedup:
+                dedup_set.add(line)
+            line = line.rstrip(line_end).split(splitter)
+            if len(line) != 3:
+                continue
+            num_lines += 1
+            e1 = self.multiG.KG1.ent_str2index(line[0])
+            e2 = self.multiG.KG2.ent_str2index(line[2])
+            if e1 is None or e2 is None:
+                continue
+            align.append([e1, e2])
+            if self.lr_map.get(e1) is None:
+                self.lr_map[e1] = set([e2])
+            else:
+                self.lr_map[e1].add(e2)
+            # if self.hr_map.get(e2) is None:
+            #     self.test_hr_map[e1] = {}
+            # if self.lr_map.get(e2) is None:
+            #     self.lr_map[e2] = set([e1])
+            # else:
+            #     self.lr_map[e2].add(e1)
+        self.test_align = np.array(align, dtype=np.int32)
+        print("load test data from %s %d out of %d" % (filename, len(align), num_lines))
+
+    def load_test_link(self, filename, max_num=2000, splitter='\t', line_end='\n', dedup=True):
         num_lines = 0
         triples = []
         dedup_set = set([])
@@ -324,6 +360,28 @@ class Tester(object):
         return KG.rel_str2index(str)
 
     # input must contain a pool of vecs. return a list of indices and dist
+    def kNN_torch(self, vec, vec_pool, topk=10, self_id=None, except_ids=None, limit_ids=None):
+        dist = tester.dist_source_torch(th, tr, tt, source=args.method)
+        for i in range(len(vec_pool)):
+            # skip self
+            if i == self_id or ((not except_ids is None) and i in except_ids):
+                continue
+            if (not limit_ids is None) and i not in limit_ids:
+                continue
+            dist = LA.norm(vec - vec_pool[i], ord=(1 if self.multiG.L1 else 2))
+            if len(q) < topk:
+                HP.heappush(q, self.index_dist(i, dist))
+            else:
+                # indeed it fetches the biggest
+                tmp = HP.nsmallest(1, q)[0]
+                if tmp.dist > dist:
+                    HP.heapreplace(q, self.index_dist(i, dist))
+        rst = []
+        while len(q) > 0:
+            item = HP.heappop(q)
+            rst.insert(0, (item.index, item.dist))
+        return rst
+
     def kNN(self, vec, vec_pool, topk=10, self_id=None, except_ids=None, limit_ids=None):
         q = []
         for i in range(len(vec_pool)):
@@ -452,11 +510,32 @@ class Tester(object):
         return np.dot(vec_e, self.mat)
     '''
 
-    def projection(self, e, source, activation=True):
+    def projection_torch(self, e1, e2, activation=True, bridge="CMP-double"):
+        vec_e1 = self.vec_e[1][e1]  # instance to onto space
+        vec_e2 = self.vec_e[2][e2]
+        if activation:
+            if bridge == "CMP-double":
+                la_emb1 = torch.tanh(torch.matmul(vec_e1, self.Me) + self.be)
+                la_emb2 = torch.tanh(torch.matmul(vec_e2, self.Mc) + self.bc)
+            else:
+                la_emb1 = torch.tanh(torch.matmul(vec_e1, self.mat) + self.b)
+                la_emb2 = vec_e2
+        else:
+            la_emb1 = torch.matmul(vec_e1, self.mat) + self.b
+            la_emb2 = vec_e2
+        return la_emb1, la_emb2
+
+    def projection_dist_L2(self, la_emb1, la_emb2):
+        return torch.norm(la_emb1 - la_emb2, p=2, dim=1)
+
+
+    def projection(self, e, source, activation=True, bridge="CMP-double"):
         assert (source in set([1, 2]))
         vec_e = self.ent_index2vec(e, source)
         # return np.add(np.dot(vec_e, self.mat), self._b)
         if activation:
+            if bridge == "CMP-double":
+                return np.tanh(np.dot(vec_e, self.Me))
             return np.tanh(np.dot(vec_e, self.mat))
         else:
             return np.dot(vec_e, self.mat)
@@ -473,8 +552,10 @@ class Tester(object):
         return np.dot(vec, self.mat)
 
     # Currently supporting only lan1 to lan2
-    def projection_pool(self, ht_vec):
+    def projection_pool(self, ht_vec, bridge="CMP-double"):
         # return np.add(np.dot(ht_vec, self.mat), self._b)
+        if bridge == "CMP-double":
+            return np.tanh(np.dot(ht_vec, self.Me))
         return np.dot(ht_vec, self.mat)
 
     def dist_source(self, h, r, t, source='transe'):

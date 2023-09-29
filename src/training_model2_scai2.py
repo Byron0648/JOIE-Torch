@@ -31,7 +31,7 @@ parser.add_argument('--bridge', type=str, help='entity-concept link method', def
 parser.add_argument('--kg1f', type=str, help='KG1 file path', default="../data/dbpedia/db_insnet_train.txt")
 parser.add_argument('--kg2f', type=str, help='KG2 file path', default="../data/dbpedia/db_onto_small_train.txt")
 parser.add_argument('--alignf', type=str, help='type link file path', default="../data/dbpedia/db_InsType_train.txt")
-parser.add_argument('--modelname', type=str, help='model name and data path', default="./dbpedia")
+parser.add_argument('--modelname', type=str, help='model name and data path', default="./dbpedia11")
 parser.add_argument('--GPU', type=str, default='0', help='GPU Usage')
 # hyper-parameters
 parser.add_argument('--dim1', type=int, default=300, help='Entity dimension')  # update dim
