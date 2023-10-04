@@ -108,3 +108,5 @@ venv.bak/
 *.ckpt
 src/model
 model/
+
+data/

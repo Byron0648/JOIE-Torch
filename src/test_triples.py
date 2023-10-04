@@ -54,6 +54,7 @@ if args.task == "triple-completion":
 else:
     tester.load_cross_link(test_data, max_num=max_check, splitter='\t', line_end='\n')
 
+
 def triple_completion(tester):
     ranks = []
     hit_1 = 0
@@ -78,36 +79,49 @@ def triple_completion(tester):
         ta = torch.tensor(all_ent, dtype=torch.long)
         # 计算三元组尾实体为r的打分距离
         dist = tester.dist_source_torch(th, tr, tt, source=args.method)
+        # 计算所有头实体的打分距离
+        dist_head_list = tester.dist_source_torch(ta, tr, tt, source=args.method)
+        # 计算小于头实体的实体个数（头实体排名）
+        head_rank = torch.sum(dist_head_list <= dist).item()
+        ranks.append(head_rank)
         # 计算所有尾实体的打分距离
-        dist_list = tester.dist_source_torch(th, tr, ta, source=args.method)
+        dist_tail_list = tester.dist_source_torch(th, tr, ta, source=args.method)
         # 计算小于尾实体的实体个数（尾实体排名）
-        tail_rank = torch.sum(dist_list <= dist).item()
+        tail_rank = torch.sum(dist_tail_list <= dist).item()
         ranks.append(tail_rank)
 
-        values, indices = torch.topk(dist_list, topK, largest=False)
-        print(values)
-        print(indices)
+        head_values, head_indices = torch.topk(dist_head_list, topK, largest=False)
+        tail_values, tail_indices = torch.topk(dist_tail_list, topK, largest=False)
 
-        if tail_rank <= 1 or indices[0].item() in tester.test_hr_map[h][r] \
-                or tester.ent_index2str(indices[0], tester.graph_id) == strr:
+        # if head_rank <= 1 and head_indices[0].item() in tester.test_tr_map[t][r]:
+        if head_rank <= 1 and head_indices[0].item() == h:
             hit_1 += 1
         for i in range(topK):
-            if tail_rank <= 10 or indices[i].item() in tester.test_hr_map[h][r] \
-                    or tester.ent_index2str(indices[i], tester.graph_id) == strr:
+            # if head_indices[i].item() in tester.test_tr_map[t][r]:
+            if head_indices[i].item() == h:
+                hit_10 += 1
+                break
+
+        # if tail_rank <= 1 and tail_indices[0].item() in tester.test_hr_map[h][r]:
+        if tail_rank <= 1 and tail_indices[0].item() == t:
+            hit_1 += 1
+        for i in range(topK):
+            # if tail_indices[i].item() in tester.test_hr_map[h][r]:
+            if tail_indices[i].item() == t:
                 hit_10 += 1
                 break
 
         if idx % 1000 == 0:
-            print(np.mean(1 / np.array(ranks)), hit_1 / len(np.array(ranks)), hit_10 / len(ranks))
+            print(np.mean(1 / np.array(ranks)), hit_1 / len(ranks), hit_10 / len(ranks))
 
     # mrr指标
     mrr = np.mean(1 / np.array(ranks))
     # hit@1指标
-    hit_1 = hit_1 / len(test_triples)
+    hit_1 = hit_1 / len(ranks)
     # hit@10指标
-    hit_10 = hit_10 / len(test_triples)
+    hit_10 = hit_10 / len(ranks)
 
-    print(np.mean(1 / np.array(ranks)), hit_1, hit_10)
+    print(mrr, hit_1, hit_10)
 
     return mrr, hit_1, hit_10
 
