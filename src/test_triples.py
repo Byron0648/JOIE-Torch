@@ -20,10 +20,10 @@ parser.add_argument('--model', type=str, help='model name including data and mod
                     default="transe_CMP-double_dim1_300_dim2_100_a1_2.5_a2_1.0_m1_0.5_fold_3")
 parser.add_argument('--task', type=str, help="tasks", choices=["triple-completion", "entity-typing"],
                     default="triple-completion")
-parser.add_argument('--testfile', type=str, help='test data', default="../data/dbpedia/db_onto_small_test.txt")
+parser.add_argument('--testfile', type=str, help='test data', default="../data/dbpedia/db_insnet_test.txt")
 parser.add_argument('--method', type=str, help='embedding method used')
 parser.add_argument('--resultfolder', type=str, help='result output folder', default="dbpedia")
-parser.add_argument('--graph', type=str, help='test which graph (ins/onto)', default="onto")
+parser.add_argument('--graph', type=str, help='test which graph (ins/onto)', default="ins")
 parser.add_argument('--GPU', type=str, default='0', help='GPU ID')
 args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = args.GPU
@@ -55,6 +55,7 @@ else:
     tester.load_cross_link(test_data, max_num=max_check, splitter='\t', line_end='\n')
 
 
+# 如何mask 要mask掉训练集中出现的相同hr的t2，相当于把训练集
 def triple_completion(tester):
     ranks = []
     hit_1 = 0
@@ -65,27 +66,41 @@ def triple_completion(tester):
     for triple in test_triples:
         idx += 1
         h, r, t = triple
-        # LA.norm不能广播
-
-        strr = tester.ent_index2str(t, tester.graph_id)
-
+        # mask train出现的其他结果
+        if tester.train_tr_map.get(t) is not None and tester.train_tr_map[t].get(r) is not None:
+            head_mask_train = tester.train_tr_map[t][r]
+        else:
+            head_mask_train = []
+        if tester.train_hr_map.get(h) is not None and tester.train_hr_map[h].get(r) is not None:
+            tail_mask_train = tester.train_hr_map[h][r]
+        else:
+            tail_mask_train = []
+        # mask test的其他结果
+        head_mask_test = tester.test_tr_map[t][r]
+        tail_mask_test = tester.test_hr_map[h][r]
         # 获得t的列表
         ent_num = tester.joie.num_entsA if tester.graph_id == 1 else tester.joie.num_entsB
-        all_ent = np.arange(ent_num)
+        all_ent = [x for x in range(ent_num)]
+        head_mask_all = [x for x in all_ent if x not in head_mask_train and x not in head_mask_test]
+        head_mask_all.append(h)
+        head_mask_all = torch.tensor(head_mask_all, dtype=torch.long)
+
+        tail_mask_all = [x for x in all_ent if x not in tail_mask_train and x not in tail_mask_test]
+        tail_mask_all.append(t)
+        tail_mask_all = torch.tensor(tail_mask_all, dtype=torch.long)
 
         th = torch.tensor([h], dtype=torch.long)
         tr = torch.tensor([r], dtype=torch.long)
         tt = torch.tensor([t], dtype=torch.long)
-        ta = torch.tensor(all_ent, dtype=torch.long)
         # 计算三元组尾实体为r的打分距离
         dist = tester.dist_source_torch(th, tr, tt, source=args.method)
         # 计算所有头实体的打分距离
-        dist_head_list = tester.dist_source_torch(ta, tr, tt, source=args.method)
+        dist_head_list = tester.dist_source_torch(head_mask_all, tr, tt, source=args.method)
         # 计算小于头实体的实体个数（头实体排名）
         head_rank = torch.sum(dist_head_list <= dist).item()
         ranks.append(head_rank)
         # 计算所有尾实体的打分距离
-        dist_tail_list = tester.dist_source_torch(th, tr, ta, source=args.method)
+        dist_tail_list = tester.dist_source_torch(th, tr, tail_mask_all, source=args.method)
         # 计算小于尾实体的实体个数（尾实体排名）
         tail_rank = torch.sum(dist_tail_list <= dist).item()
         ranks.append(tail_rank)
@@ -94,20 +109,20 @@ def triple_completion(tester):
         tail_values, tail_indices = torch.topk(dist_tail_list, topK, largest=False)
 
         # if head_rank <= 1 and head_indices[0].item() in tester.test_tr_map[t][r]:
-        if head_rank <= 1 and head_indices[0].item() == h:
+        if head_rank <= 1 and head_mask_all[head_indices[0]].item() == h:
             hit_1 += 1
-        for i in range(topK):
+        for i in range(10):
             # if head_indices[i].item() in tester.test_tr_map[t][r]:
-            if head_indices[i].item() == h:
+            if head_mask_all[head_indices[i]].item() == h:
                 hit_10 += 1
                 break
 
         # if tail_rank <= 1 and tail_indices[0].item() in tester.test_hr_map[h][r]:
-        if tail_rank <= 1 and tail_indices[0].item() == t:
+        if tail_rank <= 1 and tail_mask_all[tail_indices[0]].item() == t:
             hit_1 += 1
-        for i in range(topK):
+        for i in range(10):
             # if tail_indices[i].item() in tester.test_hr_map[h][r]:
-            if tail_indices[i].item() == t:
+            if tail_mask_all[tail_indices[i]].item() == t:
                 hit_10 += 1
                 break
 
@@ -162,7 +177,7 @@ def entity_typing(tester):
 
         if tail_rank <= 1 or indices[0].item() in tester.lr_map[e1]:
             hit_1 += 1
-        for i in range(topK):
+        for i in range(3):
             if tail_rank <= 3 or indices[i].item() in tester.lr_map[e1]:
                 hit_3 += 1
                 break

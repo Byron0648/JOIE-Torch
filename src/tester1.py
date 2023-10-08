@@ -110,7 +110,7 @@ class Tester(object):
         num_lines = 0
         align = []
         dedup_set = set([])
-        for line in open(filename):
+        for line in open(filename, encoding="utf-8"):
             if len(align) > max_num:
                 break
             if dedup and line in dedup_set:
@@ -130,12 +130,12 @@ class Tester(object):
                 self.lr_map[e1] = set([e2])
             else:
                 self.lr_map[e1].add(e2)
-            # if self.hr_map.get(e2) is None:
-            #     self.test_hr_map[e1] = {}
-            # if self.lr_map.get(e2) is None:
-            #     self.lr_map[e2] = set([e1])
-            # else:
-            #     self.lr_map[e2].add(e1)
+            if self.hr_map.get(e2) is None:
+                self.test_hr_map[e1] = {}
+            if self.lr_map.get(e2) is None:
+                self.lr_map[e2] = set([e1])
+            else:
+                self.lr_map[e2].add(e1)
         self.test_align = np.array(align, dtype=np.int32)
         print("load test data from %s %d out of %d" % (filename, len(align), num_lines))
 
@@ -143,7 +143,7 @@ class Tester(object):
         num_lines = 0
         triples = []
         dedup_set = set([])
-        for line in open(filename):
+        for line in open(filename, encoding="utf-8"):
             if len(triples) > max_num:
                 break
             if dedup and line in dedup_set:
@@ -172,7 +172,7 @@ class Tester(object):
             if self.test_hr_map.get(e1) is None:
                 self.test_hr_map[e1] = {}
             if self.test_hr_map[e1].get(r) is None:
-                self.test_hr_map[e1][r] = set([e1])
+                self.test_hr_map[e1][r] = set([e2])
             else:
                 self.test_hr_map[e1][r].add(e2)
 

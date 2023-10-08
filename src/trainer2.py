@@ -188,7 +188,7 @@ class Trainer(object):
             loss_AM = self.train1epoch_AM(num_AM_batch, epoch)
         return loss_KM, loss_AM
 
-    def train(self, epochs=20, save_every_epoch=10):
+    def train(self, epochs=120, save_every_epoch=20):
         self.model.to(self.device)
         t0 = time.time()
         for epoch in range(epochs):
@@ -200,13 +200,11 @@ class Trainer(object):
                 print("Training collapsed.")
                 return
             if (epoch + 1) % save_every_epoch == 0:
-                torch.save(self.model.state_dict(), self.save_path)
-                # this_save_path = self.tf_parts._saver.save(self.sess, self.save_path)
+                torch.save(self.model.state_dict(), self.save_path+"-"+str(epoch))
                 self.multiG.save(self.multiG_save_path)
                 print("MTransE saved in file: %s. Multi-graph saved in file: %s" % (
                     self.save_path, self.multiG_save_path))
         torch.save(self.model.state_dict(), self.save_path)
-        # this_save_path = self.tf_parts._saver.save(self.sess, self.save_path)
         self.multiG.save(self.multiG_save_path)
         print("MTransE saved in file: %s. Multi-graph saved in file: %s" % (self.save_path, self.multiG_save_path))
         print("Done")
